@@ -141,6 +141,24 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             return appender;
         }
 
+        public static IAppender CreateEventLogAppender(string name)
+        {
+            var appender = new EventLogAppender();
+            appender.Name = "EventLogAppender";
+
+            var layout = new log4net.Layout.PatternLayout();
+            layout.ConversionPattern = "%date;%message%newline";
+            layout.ActivateOptions();
+
+            appender.Layout = layout;
+
+            appender.LogName = name;
+            appender.ApplicationName = "StreamMonitor";
+
+            appender.ActivateOptions();
+            return appender;
+        }
+
         private void ProcessFixture(IResource fixture, string sport)
         {
             if (!_activeFixtures.ContainsKey(fixture.Id) && !_listeners.ContainsKey(fixture.Id))
@@ -148,8 +166,8 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                 _activeFixtures.TryAdd(fixture.Id, true);
                 
                 SetLevel(fixture.Id,"INFO");
-                var log = AddAppender(fixture.Id,CreateRollingFileAppender(fixture.Name,fixture.Name));
-
+                var log = AddAppender(fixture.Id,CreateRollingFileAppender(fixture.Name,fixture.Name + "-" + fixture.Id));
+                
                 var matchStatus = 0;
                 
                 if (fixture.Content != null)
@@ -205,31 +223,37 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             }
         }
 
-        private List<Tuple<string, string, Dictionary<string, string>>> ProcessSnapshot(Fixture fixture)
+        private List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>> ProcessSnapshot(Fixture fixture)
         {
-            var name = new List<Tuple<string, string, Dictionary<string, string>>>();
- 
+            var name = new List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>>();
+
             foreach (var market in fixture.Markets)
             {
-                Tuple<string, string, Dictionary<string, string>> t;
+                Tuple<string, Dictionary<string, string>, Dictionary<string, string>> t;
                 var marketId = market.Id;
                 var marketName = market.Id;
-                if(market.Tags.ContainsKey("name"))
+                var marketType = "unknown";
+                if (market.Tags.ContainsKey("name"))
                 {
                     marketName = market.Tags["name"].ToString();
                 }
+                if (market.Tags.ContainsKey("type"))
+                {
+                    marketType = market.Tags["type"].ToString();
+                }
+                var marketTags = new Dictionary<string, string> { { "name", marketName }, { "type", marketType } };
                 var selections = new Dictionary<string, string>();
                 foreach (var selection in market.Selections)
                 {
                     var selectionId = selection.Id;
                     var selectionName = selection.Id;
-                    if(selection.Tags.ContainsKey("name"))
+                    if (selection.Tags.ContainsKey("name"))
                     {
                         selectionName = selection.Tags["name"].ToString();
                     }
-                    selections.Add(selectionId,selectionName);
+                    selections.Add(selectionId, selectionName);
                 }
-                t = new Tuple<string, string, Dictionary<string, string>>(marketId,marketName,selections);
+                t = new Tuple<string, Dictionary<string, string>, Dictionary<string, string>>(marketId, marketTags, selections);
                 name.Add(t);
             }
             return name;

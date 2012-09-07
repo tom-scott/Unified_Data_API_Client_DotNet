@@ -34,13 +34,13 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
         private int _currentSequence = -1;
         private readonly IResource _gtpFixture;
         private string _sport;
-        private List<Tuple<string, string, Dictionary<string, string>>> _names;
+        private List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>> _names;
 
         private string Id { get; set; }
 
         public bool FixtureEnded { get; private set; }
 
-        public StreamListener(IResource gtpFixture, int currentEpoch, string sport, ILog logger, List<Tuple<string, string, Dictionary<string, string>>> names)
+        public StreamListener(IResource gtpFixture, int currentEpoch, string sport, ILog logger, List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>> names)
         {
             _logger = LogManager.GetLogger(typeof(StreamListener).ToString());
             _names = names;
@@ -214,17 +214,25 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                     {
                         var market = fixtureDelta.Markets[i];
                         var marketName = market.Id;
+                        var marketType = "unknown";
 
-                        Tuple<string, string, Dictionary<string, string>> t = null;
+                        Tuple<string, Dictionary<string, string>, Dictionary<string, string>> t = null;
 
                         if(_names.Exists(x => x.Item1 == market.Id))
                         {
                             t = _names.Single(x => x.Item1 == market.Id);
-                            marketName = t.Item2;
+                            if(t.Item2.ContainsKey("name"))
+                            {
+                                marketName = t.Item2["name"];    
+                            }
+                            if (t.Item2.ContainsKey("type"))
+                            {
+                                marketType = t.Item2["type"];
+                            }
                         }
 
                         var message = new StringBuilder();
-                        message.Append(string.Format("{0};{1};", fixtureDelta.Id, marketName));
+                        message.Append(string.Format("{0};{1};", marketType, marketName));
 
                         foreach (var selection in market.Selections)
                         {
@@ -247,19 +255,25 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             }
         }
 
-        private List<Tuple<string, string, Dictionary<string, string>>> ProcessSnapshot(Fixture fixture)
+        private List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>> ProcessSnapshot(Fixture fixture)
         {
-            var name = new List<Tuple<string, string, Dictionary<string, string>>>();
+            var name = new List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>>();
 
             foreach (var market in fixture.Markets)
             {
-                Tuple<string, string, Dictionary<string, string>> t;
+                Tuple<string, Dictionary<string,string>, Dictionary<string, string>> t;
                 var marketId = market.Id;
                 var marketName = market.Id;
+                var marketType = "unknown";
                 if (market.Tags.ContainsKey("name"))
                 {
                     marketName = market.Tags["name"].ToString();
                 }
+                if(market.Tags.ContainsKey("type"))
+                {
+                    marketType = market.Tags["type"].ToString();
+                }
+                var marketTags = new Dictionary<string, string>{{"name",marketName},{"type",marketType}};
                 var selections = new Dictionary<string, string>();
                 foreach (var selection in market.Selections)
                 {
@@ -271,7 +285,7 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                     }
                     selections.Add(selectionId, selectionName);
                 }
-                t = new Tuple<string, string, Dictionary<string, string>>(marketId, marketName, selections);
+                t = new Tuple<string, Dictionary<string, string>, Dictionary<string, string>>(marketId, marketTags, selections);
                 name.Add(t);
             }
             return name;
