@@ -8,6 +8,7 @@
 	 <ExtensionTasksPath>$(MSBuildExtensionsPath)\MSBuildExtensions\</ExtensionTasksPath>
     <!--Solution file-->
     <SolutionFileName>$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.sln</SolutionFileName>
+    <DoxyGen>"C:\Program Files\doxygen\bin\doxygen.exe"</DoxyGen>
   </PropertyGroup>
 
   
@@ -21,10 +22,12 @@
   
   <Target Name="Version">
     <PropertyGroup>
-      <MajorVersion>$(MajorVersion)</MajorVersion>
-      <MinorVersion>$(MinorVersion)</MinorVersion>
-      <BuildVersion>$(BuildVersion)</BuildVersion>
-      <RevisionNumber>$(RevisionNumber)</RevisionNumber>
+     <MajorVersion>1</MajorVersion>
+      <MinorVersion>0</MinorVersion>
+      <BuildVersion>0</BuildVersion>
+      <!--Use the build number to quickly identify the repo version used to build-->
+      <BuildVersion Condition="$(BUILD_NUMBER) != ''">$(BUILD_NUMBER)</BuildVersion>
+      <RevisionNumber>0</RevisionNumber>
     </PropertyGroup>
     <!--Version the CommonAssemblyInfo.cs file-->
     <MSBuild.ExtensionPack.Framework.AssemblyInfo AssemblyInfoFiles="$(MSBuildProjectDirectory)\CommonAssemblyInfo.cs"
@@ -73,8 +76,14 @@
     <Message Text="Build Setup Projects" />
   </Target>
   
-  <Target Name="Build" DependsOnTargets="Clean;Compile;PrepareForZip;Test;Setup;BuildZip">
+  <Target Name="Build" DependsOnTargets="Clean;Compile;GenerateDocs;PrepareForZip;Test;Setup;BuildZip">
     <Message Text="Build Complete" />
+  </Target>
+  
+  <Target Name="GenerateDocs" DependsOnTargets="Compile">
+	<!-- <Exec Command="type $(MSBuildProjectDirectory)\documentation\doxyfile &amp; echo PROJECT_NUMBER=$(BuildVersion)" /> -->
+	<Exec Command="echo PROJECT_NUMBER=$(MajorVersion).$(MinorVersion).$(BuildVersion).$(RevisionNumber) &gt;&gt; $(MSBuildProjectDirectory)\documentation\doxyfile" /> 
+	<Exec Command="$(DoxyGen) $(MSBuildProjectDirectory)\documentation\doxyfile" />	
   </Target>
   
   <Target Name="PrepareForZip">
@@ -83,14 +92,20 @@
 			<LibFiles Include="$(MSBuildProjectDirectory)\lib\**\*.*" Exclude="$(MSBuildProjectDirectory)\lib\**\.svn\**" />
 			<SDKSrcFiles Include="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk\**\*.*" Exclude="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk\**\.svn\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk\**\bin\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk\**\obj\**" />
 			<ExampleSrcFiles Include="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.Example.Console\**\*.*" Exclude="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.Example.Console\**\.svn\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.Example.Console\**\bin\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.Example.Console\**\obj\**" />
+			<StreamingExampleSrcFiles Include="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.StreamingExample.Console\**\*.*" Exclude="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.StreamingExample.Console\**\.svn\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.StreamingExample.Console\**\bin\**;$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.StreamingExample.Console\**\obj\**" />
 			<!--TestSrcFiles Include="$(MSBuildProjectDirectory)\SPIN.Wholesale.SDK.Tests\**\*.*" Exclude="$(MSBuildProjectDirectory)\SPIN.Wholesale.SDK.Tests\**\.svn\**;$(MSBuildProjectDirectory)\SPIN.Wholesale.SDK.Tests\**\bin\**;$(MSBuildProjectDirectory)\SPIN.Wholesale.SDK.Tests\**\obj\**" /-->
 			<SlnSrcFiles Include="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk.sln"  />
+			<Docs Include="$(MSBuildProjectDirectory)\documentation\html\**" />			
+			<SDKBinaries Include="$(MSBuildProjectDirectory)\SportingSolutions.Udapi.Sdk\**\bin\**" />
 		</ItemGroup>
 		
 		<Copy SourceFiles="@(LibFiles)" DestinationFolder="$(BuildDir)\\Src\\lib\\%(RecursiveDir)"/>	
 		<Copy SourceFiles="@(SDKSrcFiles)" DestinationFolder="$(BuildDir)\\Src\\SportingSolutions.Udapi.Sdk\\%(RecursiveDir)"/>	
 		<Copy SourceFiles="@(ExampleSrcFiles)" DestinationFolder="$(BuildDir)\\Src\\SportingSolutions.Udapi.Sdk.Example.Console\\%(RecursiveDir)"/>	
-		<Copy SourceFiles="@(SlnSrcFiles)" DestinationFolder="$(BuildDir)\\Src"/>	
+		<Copy sourceFiles="@(StreamingExampleSrcFiles)" DestinationFolder="$(BuildDir)\\Src\\SportingSolutions.Udapi.Sdk.StreamingExample.Console\\%(RecursiveDir)"/>	
+		<Copy SourceFiles="@(SlnSrcFiles)" DestinationFolder="$(BuildDir)\\Src"/>
+		<Copy SourceFiles="@(Docs)" DestinationFolder="$(BuildDir)\\docs\\%(RecursiveDir)" />
+		<Copy SourceFiles="@(SDKBinaries)" DestinationFolder="$(BuildDir)\\bin" />
 		
 	</Target>
 	

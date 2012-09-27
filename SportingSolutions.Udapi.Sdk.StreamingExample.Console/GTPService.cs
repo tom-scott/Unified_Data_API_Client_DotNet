@@ -21,6 +21,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using SportingSolutions.Udapi.Sdk.Interfaces;
+using SportingSolutions.Udapi.Sdk.StreamingExample.Console.Configuration;
 using SportingSolutions.Udapi.Sdk.StreamingExample.Console.Model;
 using log4net;
 using log4net.Appender;
@@ -31,12 +32,14 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
     {
         private readonly ILog _logger;
         private Timer _theTimer;
+        private readonly ISettings _settings;
         private readonly IList<string> _sportsList;
         private readonly ConcurrentDictionary<string, StreamListener> _listeners;
         private readonly ConcurrentDictionary<string, bool> _activeFixtures;
 
-        public GTPService()
+        public GTPService(ISettings settings = null)
         {
+            _settings = settings ?? Settings.Instance;
             _logger = LogManager.GetLogger(typeof(GTPService).ToString());
             _sportsList = new List<string> {"Tennis","Football","Baseball","Basketball","IceHockey","Rugby"};
             _listeners = new ConcurrentDictionary<string, StreamListener>();
@@ -48,19 +51,15 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             try
             {
                 _logger.Debug("Starting GTPService");
-                _logger.Info("Connecting to UDAPI....");
-                ICredentials credentials = new Credentials { UserName = ConfigurationManager.AppSettings["ss.user"], Password = ConfigurationManager.AppSettings["ss.password"] };
-                var theSession = SessionFactory.CreateSession(new Uri(ConfigurationManager.AppSettings["ss.url"]), credentials);
-                _logger.Info("Successfully connected to UDAPI.");
+                IService theService = new Udapi.Udapi();
+
                 _logger.Debug("UDAPI, Getting Service");
-                var theService = theSession.GetService("UnifiedDataAPI");
-                _logger.Debug("UDAPI, Retrieved Service");
                 _logger.Info("Starting timer...");
-                _theTimer = new Timer(timerAutoEvent => TimerEvent(theService), null, 0, Convert.ToInt32(ConfigurationManager.AppSettings["ss.newFixtureCheckerFrequency"]));    
+                _theTimer = new Timer(timerAutoEvent => TimerEvent(theService), null, 0, _settings.FixtureCheckerFrequency);    
             }
             catch(Exception ex)
             {
-                _logger.Error(ex);
+                _logger.Fatal("A fatal error has occurred and the EVenue Adapater cannot start. You can try a manual restart", ex);   
                 throw;
             }
         }
@@ -163,46 +162,57 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
         {
             if (!_activeFixtures.ContainsKey(fixture.Id) && !_listeners.ContainsKey(fixture.Id))
             {
+                try
+                {
                 _activeFixtures.TryAdd(fixture.Id, true);
                 
                 SetLevel(fixture.Id,"INFO");
                 var log = AddAppender(fixture.Id,CreateRollingFileAppender(fixture.Name,fixture.Name + "-" + fixture.Id));
-                
-                var matchStatus = 0;
-                
-                if (fixture.Content != null)
-                {
-                    matchStatus = fixture.Content.MatchStatus;
-                }
 
-                //if not match over
-                if(matchStatus != 50)
-                {
-                    _logger.InfoFormat("Get UDAPI Snapshot for {0} id {1}", fixture.Name, fixture.Id);
-                    var snapshotString = fixture.GetSnapshot();
-                    _logger.InfoFormat("Successfully retrieved UDAPI Snapshot for {0} id {1}", fixture.Name, fixture.Id);
+                    var matchStatus = 0;
+                    var matchSequence = 0;
+                    if (fixture.Content != null)
+                    {
+                        matchStatus = fixture.Content.MatchStatus;
+                        //Get the sequence number, if you store this to file you can check if you need to process a snapshot between restarts
+                        //this can save pushing unnesasary snapshots
+                        matchSequence = fixture.Content.Sequence;
+                    }
 
-                    var fixtureSnapshot =
-                       (Fixture)
-                       JsonConvert.DeserializeObject(snapshotString, typeof(Fixture),
-                                                       new JsonSerializerSettings
-                                                       {
-                                                           Converters =
-                                                               new List<JsonConverter> { new IsoDateTimeConverter() },
-                                                           NullValueHandling = NullValueHandling.Ignore
-                                                       });
+                    //if not match over
+                    if (matchStatus != (int)SSMatchStatus.MatchOver)
+                    {
+                        _logger.InfoFormat("Get UDAPI Snapshot for {0} id {1}", fixture.Name, fixture.Id);
+                        var snapshotString = fixture.GetSnapshot();
+                        _logger.InfoFormat("Successfully retrieved UDAPI Snapshot for {0} id {1}", fixture.Name, fixture.Id);
 
-                    var epoch = fixtureSnapshot.Epoch;
+                        var fixtureSnapshot =
+                           (Fixture)
+                           JsonConvert.DeserializeObject(snapshotString, typeof(Fixture),
+                                                           new JsonSerializerSettings
+                                                           {
+                                                               Converters =
+                                                                   new List<JsonConverter> { new IsoDateTimeConverter() },
+                                                               NullValueHandling = NullValueHandling.Ignore
+                                                           });
+
+                        var epoch = fixtureSnapshot.Epoch;
 
                     var names = ProcessSnapshot(fixtureSnapshot);
 
                     var streamListener = new StreamListener(fixture, epoch, sport,log,names);
-                    _listeners.TryAdd(fixture.Id, streamListener);
+                        _listeners.TryAdd(fixture.Id, streamListener);
+                    }
+                    else
+                    {
+                        _logger.InfoFormat("Fixture {0} id {1} has finished. Will not process", fixture.Name, fixture.Id);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    _logger.InfoFormat("Fixture {0} id {1} has finished. Will not process", fixture.Name, fixture.Id);
+                    _logger.Error(string.Format("Fixture {0} id {1} There is a problem processing this fixture", fixture.Name, fixture.Id), ex);
                 }
+                
                 bool y;
                 _activeFixtures.TryRemove(fixture.Id, out y);
             }
@@ -218,6 +228,8 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                         {
                             _logger.InfoFormat("Fixture {0} id {1} is over.", fixture.Name, fixture.Id);
                         }
+                        bool activeFixture;
+                        _activeFixtures.TryRemove(fixture.Id, out activeFixture);
                     }
                 }
             }
@@ -264,6 +276,17 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             if (_theTimer != null)
             {
                 _theTimer.Dispose();
+                _theTimer = null;
+
+                if(_listeners != null)
+                {
+                    Parallel.ForEach(_listeners.Keys, new ParallelOptions {MaxDegreeOfParallelism = 10},
+                                     theKey =>
+                                         {
+                                             var listener = _listeners[theKey];
+                                             listener.StopListening();
+                                         });
+                }
             }
         }
 

@@ -1,4 +1,3 @@
-
 _ReSharper.SportingSolutions.Udapi.Sdk/*
 build/*
 *.nupkg
@@ -15,3 +14,4 @@ SportingSolutions.Udapi.Sdk*.zip
 *.user
 BuildOutput/
 *.ncrunch*
+html/

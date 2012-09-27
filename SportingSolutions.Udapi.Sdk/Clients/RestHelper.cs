@@ -19,6 +19,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Cache;
 using System.Text;
+using SportingSolutions.Udapi.Sdk.Exceptions;
 
 namespace SportingSolutions.Udapi.Sdk.Clients
 {
@@ -93,14 +94,28 @@ namespace SportingSolutions.Udapi.Sdk.Clients
                 using(var response = ex.Response)
                 {
                     var httpResponse = (HttpWebResponse) response;
-                    using(var rdata = httpResponse.GetResponseStream())
+                    if (httpResponse != null)
                     {
-                        if (rdata != null)
+                        using (var rdata = httpResponse.GetResponseStream())
                         {
-                            var text = new StreamReader(rdata).ReadToEnd();
-                            throw new WebException(text, ex, ex.Status, ex.Response);
+                            if (rdata != null)
+                            {
+                                var text = new StreamReader(rdata).ReadToEnd();
+                                if(httpResponse.StatusCode == HttpStatusCode.Unauthorized)
+                                {
+                                    throw new NotAuthenticatedException(text,ex);
+                                }
+                                else
+                                {
+                                    throw new Exception(text, ex);
+                                }
+                            }
+                            throw new Exception(ex.Message,ex);
                         }
-                        throw;
+                    }
+                    else
+                    {
+                        throw new Exception(ex.Message, ex);
                     }
                 }
             }

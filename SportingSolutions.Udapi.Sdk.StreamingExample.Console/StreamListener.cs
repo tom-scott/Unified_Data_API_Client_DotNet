@@ -13,6 +13,7 @@
 //limitations under the License.
 
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -21,6 +22,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using SportingSolutions.Udapi.Sdk.Events;
 using SportingSolutions.Udapi.Sdk.Interfaces;
+using SportingSolutions.Udapi.Sdk.StreamingExample.Console.Configuration;
 using SportingSolutions.Udapi.Sdk.StreamingExample.Console.Model;
 using log4net;
 
@@ -30,11 +32,12 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
     {
         private readonly ILog _streamLogger;
         private readonly ILog _logger;
-        private int _currentEpoch;
-        private int _currentSequence = -1;
         private readonly IResource _gtpFixture;
+        private int _currentEpoch;
+        private int _currentSequence;
         private string _sport;
         private List<Tuple<string, Dictionary<string, string>, Dictionary<string, string>>> _names;
+        private readonly ISettings _settings;
 
         private string Id { get; set; }
 
@@ -49,8 +52,19 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             _gtpFixture = gtpFixture;
             _sport = sport;
             _currentEpoch = currentEpoch;
+            _settings = Settings.Instance;
             Id = _gtpFixture.Id;
+            _currentSequence = -1;
+
             Listen();
+        }
+
+        public void StopListening()
+        {
+            if (_gtpFixture != null)
+            {
+                _gtpFixture.StopStreaming();
+            }
         }
 
         private void Listen()
@@ -60,8 +74,8 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                 _gtpFixture.StreamConnected += GtpFixtureStreamConnected;
                 _gtpFixture.StreamDisconnected += GtpFixtureStreamDisconnected;
                 _gtpFixture.StreamEvent += GtpFixtureStreamEvent;
-                _gtpFixture.StreamSynchronizationError += GtpFixtureStreamSynchronizationError;
-                _gtpFixture.StartStreaming();
+
+                _gtpFixture.StartStreaming(_settings.EchoInterval, _settings.EchoMaxDelay);
             }
             catch (Exception ex)
             {
@@ -71,7 +85,19 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
         }
         private void GtpFixtureStreamDisconnected(object sender, EventArgs e)
         {
-            _logger.InfoFormat("Stream disconnected for {0} id {1}", _gtpFixture.Name, _gtpFixture.Id);
+            if (!FixtureEnded)
+            {
+                _logger.WarnFormat("Stream disconnected due to problem with {0}, suspending markets, will try reconnect within 1 minute", _gtpFixture.Name);
+                FixtureEnded = true;
+                
+                //The Stream has disconnected but the fixture hasn't ended, must be in an error state
+                //Probably should suspend all markets for this fixture
+                SuspendAllMarkets();
+            }
+            else
+            {
+                _logger.InfoFormat("Stream disconnected for {0}", _gtpFixture.Name);
+            }
         }
 
         private void GtpFixtureStreamConnected(object sender, EventArgs e)
@@ -79,27 +105,6 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             _logger.InfoFormat("Stream connected for {0} id {1}", _gtpFixture.Name, _gtpFixture.Id);
         }
 
-        private void GtpFixtureStreamSynchronizationError(object sender, EventArgs e)
-        {
-            _logger.WarnFormat("Stream out of sync for {0}",_gtpFixture.Name);
-            var resource = sender as IResource;
-
-            resource.PauseStreaming();
-            var snapshotString = resource.GetSnapshot();
-            var fixtureSnapshot =
-                        (Fixture)
-                        JsonConvert.DeserializeObject(snapshotString, typeof(Fixture),
-                                                      new JsonSerializerSettings
-                                                      {
-                                                          Converters = new List<JsonConverter> { new IsoDateTimeConverter() },
-                                                          NullValueHandling = NullValueHandling.Ignore
-                                                      });
-            _currentEpoch = fixtureSnapshot.Epoch;
-            if (fixtureSnapshot.MatchStatus != "50")
-            {
-                resource.UnPauseStreaming();
-            }
-        }
 
         private void GtpFixtureStreamEvent(object sender, StreamEventArgs e)
         {
@@ -121,6 +126,7 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                 var fixtureDelta = streamMessage.GetContent<Fixture>();
                 _streamLogger.InfoFormat("############################################################# \n");
 
+              
                 if (fixtureDelta.Epoch > _currentEpoch)
                 {
                     var sb = new StringBuilder();
@@ -137,7 +143,6 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                     _streamLogger.InfoFormat("sequence {0};size {1}kb", fixtureDelta.Sequence, newsize);    
                 }
                 
-
                 if(fixtureDelta.Sequence < _currentSequence)
                 {
                     _logger.InfoFormat("Fixture {0} id {1} sequence {2} is less than current sequence {3}", _gtpFixture.Name, _gtpFixture.Id, fixtureDelta.Sequence, _currentSequence);
@@ -149,7 +154,7 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
                 }
 
                 _currentSequence = fixtureDelta.Sequence;
-
+                
                 if (fixtureDelta.Epoch > _currentEpoch)
                 {
                     _logger.InfoFormat("Epoch changed for {0} id {1} from {2} to {3}", _gtpFixture.Name, _gtpFixture.Id, _currentEpoch, fixtureDelta.Epoch);
@@ -169,28 +174,31 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
 
                         var fixtureSnapshot =
                             (Fixture)
-                            JsonConvert.DeserializeObject(snapshotString, typeof(Fixture),
+                            JsonConvert.DeserializeObject(snapshotString, typeof (Fixture),
                                                           new JsonSerializerSettings
-                                                          {
-                                                              Converters = new List<JsonConverter> { new IsoDateTimeConverter() },
-                                                              NullValueHandling = NullValueHandling.Ignore
-                                                          });
+                                                              {
+                                                                  Converters =
+                                                                      new List<JsonConverter>
+                                                                          {new IsoDateTimeConverter()},
+                                                                  NullValueHandling = NullValueHandling.Ignore
+                                                              });
                         _currentEpoch = fixtureSnapshot.Epoch;
-
                         _names = ProcessSnapshot(fixtureSnapshot);
 
                         _logger.Info(fixtureSnapshot);
-
-                        if (fixtureDelta.MatchStatus != "50")
+                        //If an error occured this may be null. Nothing we can do but unpasuse the stream
+                        if (fixtureSnapshot == null ||
+                            fixtureSnapshot.MatchStatus != ((int) SSMatchStatus.MatchOver).ToString())
                         {
-                            resource.UnPauseStreaming();
+                            _gtpFixture.UnPauseStreaming();
                         }
                         else
                         {
-                            _logger.InfoFormat("Stopping Streaming for {0} with id {1}, Match Status is Match Over", _gtpFixture.Name, _gtpFixture.Id);
+                            _logger.InfoFormat("Stopping Streaming for {0} with id {1}, Match Status is Match Over",
+                                               _gtpFixture.Name, _gtpFixture.Id);
                             _gtpFixture.StopStreaming();
                             FixtureEnded = true;
-                        }    
+                        }
                     }
                 }
                 else if (fixtureDelta.Epoch == _currentEpoch)
@@ -204,6 +212,14 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
             {
                 _logger.Error(ex);
             }
+        }
+
+        
+
+        private void SuspendAllMarkets()
+        {
+            
+        
         }
 
         private void ProcessDelta(Fixture fixtureDelta)
@@ -294,7 +310,7 @@ namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console
         private string GetEpochChangeReason(int ecr)
         {
             var result = "";
-            switch(ecr)
+            switch (ecr)
             {
                 case 0:
                     result = "Created";

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-
+﻿
 namespace SportingSolutions.Udapi.Sdk.StreamingExample.Console.Model
 {
     public enum SSEpochChangeReason
