@@ -1,4 +1,3 @@
-This is a bad commit. Just for examples.
 
 This is the master repository for the Sporting Solutions Unified Data API Client for the .Net Framework.
 The SDK provides an easy to use interface into the Sporting Solutions Unified Data API.  
